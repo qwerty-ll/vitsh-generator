@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Генератор постов ВИТШ Медиа: анонсы, фотоотчёты, цитаты и новости по брендбуку.">
+</head>
+<body>
+<title>Генератор постов ВИТШ Медиа</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  /* Генератор постов ВИТШ Медиа: слева — поля, справа — живой макет на canvas.
+     Интерфейс в том же стиле, что и посты: бумага, миллиметровка, синий акцент, моно-подписи. */
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --fg: #111111; --fg-2: #4a4b50; --muted: #8a8c93;
+    --line: #e3e5ea; --accent: #4392ee; --accent-ink: #ffffff; --field: #f7f8fa; --grid: #eceef1;
+    --sans: "Onest", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: #0c1424; --panel: #121c30; --fg: #f2f4f8; --fg-2: #c4cde0; --muted: #8a98b8;
+    --line: #22304a; --accent: #5aa0f2; --accent-ink: #0c1424; --field: #0f182a; --grid: #172238; color-scheme: dark; } }
+  :root[data-theme="dark"] {
+    --bg: #0c1424; --panel: #121c30; --fg: #f2f4f8; --fg-2: #c4cde0; --muted: #8a98b8;
+    --line: #22304a; --accent: #5aa0f2; --accent-ink: #0c1424; --field: #0f182a; --grid: #172238; color-scheme: dark; }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 400 15px/1.45 var(--sans);
+    background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+    background-size: 30px 30px; }
+  .app { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 24px; max-width: 1400px; margin: 0 auto;
+    padding-block: 24px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); min-height: 100%; }
+  @media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .stage { order: -1; position: static !important; } }
+
+  header.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  header.brand canvas { width: 44px; height: 44px; }
+  header.brand h1 { font: 600 20px/1.1 var(--sans); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+  header.brand p { margin: 2px 0 0; color: var(--muted); font: 500 11px/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; padding: 18px; display: grid; gap: 18px; }
+  .group { display: grid; gap: 8px; min-width: 0; }
+  .label { font: 500 11px/1.3 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { flex: 1 1 auto; border: 1px solid var(--line); background: var(--field); color: var(--fg); border-radius: 999px;
+    padding: 7px 12px; font: 500 13px var(--sans); cursor: pointer; white-space: nowrap; }
+  .seg button small { color: var(--muted); font: 500 11px var(--mono); margin-left: 4px; }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button[aria-pressed="true"] small { color: inherit; opacity: .75; }
+  .seg button:focus-visible, .btn:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .swatch { width: 14px; height: 14px; border-radius: 50%; display: inline-block; vertical-align: -2px; margin-right: 6px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+
+  .field { display: grid; gap: 6px; }
+  .field span { font-size: 13px; color: var(--fg-2); }
+  input[type=text], textarea { width: 100%; border: 1px solid var(--line); background: var(--field); color: var(--fg); border-radius: 12px;
+    padding: 9px 12px; font: 400 15px/1.4 var(--sans); }
+  textarea { resize: vertical; min-height: 64px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--fg-2); }
+
+  .drop { border: 1.5px dashed var(--line); border-radius: 14px; padding: 12px; display: flex; gap: 12px; align-items: center; background: var(--field); }
+  .drop.over { border-color: var(--accent); }
+  .drop .thumb { width: 56px; height: 56px; border-radius: 10px; background: var(--line) center/cover no-repeat; flex: none; }
+  .drop .txt { min-width: 0; display: grid; gap: 4px; }
+  .drop .txt b { font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+
+  .btn { border: 0; border-radius: 14px; padding: 12px 16px; font: 600 15px var(--sans); cursor: pointer; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  .btn.small { padding: 6px 10px; font-size: 13px; border-radius: 10px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .actions { display: grid; gap: 8px; }
+  .status { min-height: 18px; font-size: 13px; color: var(--fg-2); }
+
+  .stage { position: sticky; top: calc(24px + env(safe-area-inset-top, 0px)); align-self: start; display: grid; gap: 10px; min-width: 0; }
+  .canvas-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; padding: 18px; display: grid; place-items: center;
+    min-height: 320px; }
+  #preview { display: block; max-width: 100%; max-height: calc(100vh - 150px); height: auto; border-radius: 6px;
+    box-shadow: 0 30px 60px -40px rgba(23, 49, 96, .55); touch-action: none; }
+  #preview.pan { cursor: grab; }
+  .meta { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font: 500 11px/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <section>
+    <header class="brand">
+      <canvas id="logoMark" width="88" height="88" aria-hidden="true"></canvas>
+      <div><h1>Генератор постов</h1><p>ВИТШ Медиа · по брендбуку</p></div>
+    </header>
+
+    <form class="panel" id="form" autocomplete="off">
+      <div class="group">
+        <div class="label">Шаблон</div>
+        <div class="seg" id="tplSeg"></div>
+      </div>
+      <div class="group">
+        <div class="label">Формат</div>
+        <div class="seg" id="fmtSeg"></div>
+      </div>
+      <div class="group">
+        <div class="label">Фон</div>
+        <div class="seg" id="themeSeg"></div>
+      </div>
+
+      <div class="group" id="layoutGroup">
+        <div class="label">Где фото</div>
+        <div class="seg" id="layoutSeg"></div>
+        <div class="hint" id="layoutHint"></div>
+      </div>
+
+      <div class="group" id="photoGroup">
+        <div class="label" id="photoLabel">Фото</div>
+        <label class="drop" id="drop">
+          <span class="thumb" id="thumb"></span>
+          <span class="txt"><b id="photoName">Выберите или перетащите фото</b><span class="hint">Только настоящие фото с мероприятия. JPG или PNG.</span></span>
+          <input type="file" id="photoInput" accept="image/*" hidden>
+        </label>
+        <div class="row" id="photoTools" hidden>
+          <span class="hint" style="flex:none">Масштаб</span>
+          <input type="range" id="zoom" min="1" max="3" step="0.01" value="1" aria-label="Масштаб фото">
+          <button type="button" class="btn ghost small" id="photoClear">Убрать</button>
+        </div>
+        <div class="hint" id="panHint" hidden>Кадр двигается перетаскиванием прямо на макете.</div>
+      </div>
+
+      <div class="group" id="fields"></div>
+
+      <div class="actions">
+        <button type="button" class="btn primary" id="saveOne">Скачать PNG</button>
+        <button type="button" class="btn ghost" id="saveAll">Скачать все 4 формата (ZIP)</button>
+        <div class="status" id="status" role="status" aria-live="polite"></div>
+      </div>
+    </form>
+  </section>
+
+  <section class="stage">
+    <div class="canvas-wrap"><canvas id="preview" width="1080" height="1350" aria-label="Предпросмотр поста"></canvas></div>
+    <div class="meta"><span id="metaSize">1080 × 1350</span><span>Текст встаёт по сетке сам</span></div>
+  </section>
+</div>
+
+<script>
+/* ===================== Бренд: цвета, знак, логотип (геометрия как в brand/brand.js) ===================== */
+const C = { blue: "#4392ee", navy: "#173160", night: "#0f1d38", ink: "#111111", white: "#ffffff", mid: "#8dbaf4", pale: "#cfe2fb", paper: "#fafaf8" };
+const SANS = "Onest", MONO = "JetBrains Mono";
+const HAS_LS = "letterSpacing" in CanvasRenderingContext2D.prototype;
+
+// Знак в единицах viewBox 200: квадрат 100×100 у (25,75), скругление 10; сетка точек 6×6 у (75,25).
+function markGrid(n = 6) {
+  const step = 100 / n, out = [];
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const t = (i + (n - 1 - j)) / (2 * (n - 1));
+    const cx = 75 + step / 2 + i * step, cy = 25 + step / 2 + j * step;
+    out.push({ cx, cy, r: step * (0.08 + 0.39 * (1 - t)), hole: cx < 125 && cy > 75 });
+  }
+  return out;
+}
+function rr(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+/** Знак: (x, y) — левый верх габарита 6u × 6u, u — модуль в px. */
+function drawMark(ctx, x, y, u, { square, dot, n = 6 }) {
+  const s = u / 25, ox = x - 25 * s, oy = y - 25 * s, g = markGrid(n);
+  ctx.beginPath();
+  rr(ctx, ox + 25 * s, oy + 75 * s, 100 * s, 100 * s, 10 * s);
+  for (const d of g) if (d.hole) { ctx.moveTo(ox + (d.cx + d.r) * s, oy + d.cy * s); ctx.arc(ox + d.cx * s, oy + d.cy * s, d.r * s, 0, Math.PI * 2); }
+  ctx.fillStyle = square; ctx.fill("evenodd");
+  ctx.beginPath();
+  for (const d of g) if (!d.hole) { ctx.moveTo(ox + (d.cx + d.r) * s, oy + d.cy * s); ctx.arc(ox + d.cx * s, oy + d.cy * s, d.r * s, 0, Math.PI * 2); }
+  ctx.fillStyle = dot; ctx.fill();
+}
+
+/* ---- текст с трекингом (в браузерах без ctx.letterSpacing — по буквам) ---- */
+function textWidth(ctx, s, ls) {
+  if (HAS_LS) { ctx.letterSpacing = ls + "px"; return ctx.measureText(s).width; }
+  let w = 0; for (const ch of s) w += ctx.measureText(ch).width + ls; return w;
+}
+function fillText(ctx, s, x, y, ls) {
+  if (HAS_LS) { ctx.letterSpacing = ls + "px"; ctx.fillText(s, x, y); ctx.letterSpacing = "0px"; return; }
+  for (const ch of s) { ctx.fillText(ch, x, y); x += ctx.measureText(ch).width + ls; }
+}
+function capRatio(ctx, font) { ctx.font = font.replace(/[\d.]+px/, "1000px"); if (HAS_LS) ctx.letterSpacing = "0px"; return ctx.measureText("ВИТШН").actualBoundingBoxAscent / 1000; }
+
+/** Логотип на сетке G: знак 6G, «ВИТШ» — прописные 2G от верха квадрата, «МЕДИА» — 1G по низу квадрата. */
+function drawLockup(ctx, x, y, G, th) {
+  drawMark(ctx, x, y, G, th);
+  const fw = `600 100px ${SANS}`, size = (2 * G) / capRatio(ctx, fw), ls = -0.04 * size;
+  ctx.font = `600 ${size}px ${SANS}`;
+  if (HAS_LS) ctx.letterSpacing = ls + "px";
+  const m = ctx.measureText("ВИТШ"), inkW = m.actualBoundingBoxLeft + m.actualBoundingBoxRight - (HAS_LS ? 0 : 0);
+  ctx.fillStyle = th.ink; fillText(ctx, "ВИТШ", x + 7 * G + m.actualBoundingBoxLeft, y + 4 * G, ls);
+  // «МЕДИА»: моноширинный, растянут по чернилам ровно на ширину «ВИТШ»
+  const fm = `500 100px "${MONO}"`, msize = G / capRatio(ctx, fm);
+  ctx.font = `500 ${msize}px "${MONO}"`; if (HAS_LS) ctx.letterSpacing = "0px";
+  const letters = [..."МЕДИА"].map((ch) => { const r = ctx.measureText(ch); return { ch, l: r.actualBoundingBoxLeft, w: r.actualBoundingBoxLeft + r.actualBoundingBoxRight }; });
+  const gap = (inkW - letters.reduce((a, c) => a + c.w, 0)) / (letters.length - 1);
+  let cx = x + 7 * G; ctx.fillStyle = th.media;
+  for (const c of letters) { ctx.fillText(c.ch, cx + c.l, y + 6 * G); cx += c.w + gap; }
+  return { w: 7 * G + inkW, h: 6 * G };
+}
+function lockupWidth(ctx, G) {
+  const size = (2 * G) / capRatio(ctx, `600 100px ${SANS}`), ls = -0.04 * size;
+  ctx.font = `600 ${size}px ${SANS}`; if (HAS_LS) ctx.letterSpacing = ls + "px";
+  const m = ctx.measureText("ВИТШ"); if (HAS_LS) ctx.letterSpacing = "0px";
+  return 7 * G + m.actualBoundingBoxLeft + m.actualBoundingBoxRight;
+}
+
+/* ===================== Темы, форматы, типографика ===================== */
+const THEMES = {
+  light: { name: "Светлый", bg: C.paper, grid: "#eceef1", ink: C.ink, ink2: "#4a4a48", muted: "#8a8a86", eyebrow: C.blue,
+    tagA: [C.blue, C.white], tagB: [C.white, C.ink], ph: ["#e7edf6", "#cdd9ea", "#8094b3"],
+    lock: { square: C.blue, dot: C.navy, ink: C.ink, media: C.blue }, frag: { square: C.blue, dot: C.navy } },
+  blue: { name: "Синий", bg: C.blue, grid: "rgba(255,255,255,.14)", ink: C.white, ink2: "rgba(255,255,255,.9)", muted: "rgba(255,255,255,.66)", eyebrow: C.night,
+    tagA: [C.white, C.blue], tagB: [C.white, C.ink], ph: ["rgba(255,255,255,.16)", "rgba(255,255,255,.28)", "rgba(255,255,255,.9)"],
+    lock: { square: C.white, dot: C.navy, ink: C.white, media: C.white }, frag: { square: C.white, dot: C.navy } },
+  dark: { name: "Ночной", bg: C.night, grid: "rgba(255,255,255,.06)", ink: C.white, ink2: "#c4cde0", muted: "#8a98b8", eyebrow: C.mid,
+    tagA: [C.blue, C.white], tagB: [C.white, C.ink], ph: ["rgba(255,255,255,.06)", "rgba(255,255,255,.12)", "#8a98b8"],
+    lock: { square: C.blue, dot: C.white, ink: C.white, media: C.mid }, frag: { square: C.blue, dot: C.mid } },
+};
+// top/bottom — поля; у сторис больше: сверху и снизу ВК закрывает кадр интерфейсом
+const FORMATS = {
+  post: { label: "Пост", ratio: "4:5", W: 1080, H: 1350, top: 60, bottom: 60 },
+  square: { label: "Квадрат", ratio: "1:1", W: 1080, H: 1080, top: 60, bottom: 60 },
+  story: { label: "Сторис", ratio: "9:16", W: 1080, H: 1920, top: 180, bottom: 240 },
+  wide: { label: "Широкий", ratio: "16:9", W: 1920, H: 1080, top: 60, bottom: 60 },
+};
+// Интерлиньяж всегда кратен 30 — базовые линии стоят на линиях клетки 60 или ровно посередине
+const TYPE = {
+  display: { w: 500, size: 112, lh: 120, track: -0.045 },
+  h1: { w: 500, size: 80, lh: 90, track: -0.04 },
+  h2: { w: 500, size: 56, lh: 60, track: -0.03 },
+  quoteL: { w: 500, size: 76, lh: 90, track: -0.03 },
+  quoteM: { w: 500, size: 56, lh: 60, track: -0.025 },
+  quoteS: { w: 500, size: 44, lh: 60, track: -0.02 },
+  body: { w: 400, size: 34, lh: 60, track: -0.005 },
+  name: { w: 500, size: 52, lh: 60, track: -0.03 },
+};
+const M = 60, G_HEAD = 15;
+const s30 = (v) => Math.round(v / 30) * 30, f30 = (v) => Math.floor(v / 30) * 30, f60 = (v) => Math.floor(v / 60) * 60, c60 = (v) => Math.ceil(v / 60) * 60;
+
+/** Перенос строк по ширине; явный перенос (Enter) начинает новый абзац. */
+function wrap(ctx, text, st, maxW) {
+  ctx.font = `${st.w} ${st.size}px ${SANS}`;
+  const ls = st.track * st.size, out = [];
+  String(text || "").split("\n").forEach((para, pi) => {
+    const words = para.trim().split(/ +/).filter(Boolean);
+    if (!words.length) return;
+    let line = "";
+    for (const w of words) {
+      const test = line ? line + " " + w : w;
+      if (line && textWidth(ctx, test, ls) > maxW) { out.push({ s: line, para: pi }); line = w; } else line = test;
+    }
+    out.push({ s: line, para: pi });
+  });
+  const widest = Math.max(0, ...out.map((l) => textWidth(ctx, l.s, ls)));
+  return { lines: out, widest };
+}
+function drawLines(ctx, block, st, x, firstB, colors) {
+  ctx.font = `${st.w} ${st.size}px ${SANS}`; ctx.textBaseline = "alphabetic";
+  block.lines.forEach((l, k) => { ctx.fillStyle = colors(l.para); fillText(ctx, l.s, x, firstB + k * st.lh, st.track * st.size); });
+}
+function mono(ctx, s, x, y, color, size = 24, track = 0.14, align = "left") {
+  ctx.font = `500 ${size}px "${MONO}"`; const t = String(s || "").toUpperCase(), ls = track * size;
+  const w = textWidth(ctx, t, ls) - ls;
+  ctx.fillStyle = color; fillText(ctx, t, align === "right" ? x - w : x, y, ls);
+  return w;
+}
+/** Моно-подпись в узкой колонке: сначала чуть мельче, потом обрезка многоточием — чтобы не вылезать за поле. */
+function monoFit(ctx, s, x, y, color, maxW, track = 0.14) {
+  let t = String(s || "").toUpperCase();
+  for (const size of [24, 20]) {
+    ctx.font = `500 ${size}px "${MONO}"`;
+    if (textWidth(ctx, t, track * size) - track * size <= maxW) return mono(ctx, t, x, y, color, size, track);
+  }
+  while (t.length > 1 && textWidth(ctx, t + "…", 0.14 * 20) > maxW) t = t.slice(0, -1);
+  return mono(ctx, t.trimEnd() + "…", x, y, color, 20, track);
+}
+function plain(ctx, s, st, x, y, color, align = "left") {
+  ctx.font = `${st.w} ${st.size}px ${SANS}`; const ls = st.track * st.size, w = textWidth(ctx, s, ls) - ls;
+  ctx.fillStyle = color; fillText(ctx, s, align === "right" ? x - w : x, y, ls); return w;
+}
+/** Плашка поверх фото: высота 60, моно 24 прописными. */
+function tag(ctx, s, x, y, [bg, fg]) {
+  if (!s) return;
+  ctx.font = `500 24px "${MONO}"`; const t = s.toUpperCase(), ls = 0.12 * 24, w = textWidth(ctx, t, ls) - ls + 52;
+  ctx.save(); ctx.shadowColor = "rgba(23,49,96,.25)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 8;
+  ctx.beginPath(); rr(ctx, x, y, w, 60, 30); ctx.fillStyle = bg; ctx.fill(); ctx.restore();
+  ctx.fillStyle = fg; fillText(ctx, t, x + 26, y + 39, ls);
+}
+
+/* ===================== Фото: кадрирование «по заполнению», заглушка ===================== */
+let lastGeom = null;
+function drawPhoto(ctx, box, ph, th, round, label) {
+  ctx.save(); ctx.beginPath();
+  if (round === "circle") ctx.arc(box.x + box.w / 2, box.y + box.h / 2, box.w / 2, 0, Math.PI * 2); else rr(ctx, box.x, box.y, box.w, box.h, round);
+  ctx.clip();
+  if (ph && ph.img) {
+    const { img } = ph, k = Math.max(box.w / img.width, box.h / img.height) * ph.zoom;
+    const dw = img.width * k, dh = img.height * k;
+    const geom = { dw, dh, ox: dw - box.w, oy: dh - box.h };
+    ctx.drawImage(img, box.x - geom.ox * ph.fx, box.y - geom.oy * ph.fy, dw, dh);
+    box.geom = geom; lastGeom = geom;
+  } else {
+    const [bg, dot, ink] = th.ph;
+    ctx.fillStyle = bg; ctx.fillRect(box.x, box.y, box.w, box.h);
+    ctx.fillStyle = dot;
+    for (let y = box.y + 7.5; y < box.y + box.h; y += 15) for (let x = box.x + 7.5; x < box.x + box.w; x += 15) { ctx.beginPath(); ctx.arc(x, y, 1.6, 0, Math.PI * 2); ctx.fill(); }
+    if (label && box.w > 200) {
+      ctx.font = `500 22px "${MONO}"`; ctx.fillStyle = ink; const t = label.toUpperCase();
+      fillText(ctx, t, box.x + box.w / 2 - (textWidth(ctx, t, 3) - 3) / 2, box.y + box.h / 2 + 8, 3);
+    }
+  }
+  ctx.restore();
+}
+
+/* ===================== Шаблоны ===================== */
+/** Шапка: логотип G=15 слева, метка справа на базовой линии «ВИТШ». */
+function header(ctx, f, th, x0, x1, label) {
+  drawLockup(ctx, x0, f.top, G_HEAD, th.lock);
+  if (label) mono(ctx, label, x1, f.top + 60, th.muted, 24, 0.14, "right");
+}
+const titleColors = (th, d) => (para) => (d.twoTone && para > 0 ? th.muted : th.ink);
+
+/** Подбор кегля заголовка: самый крупный, при котором строк не больше maxLines и остаётся место. */
+function fitTitle(ctx, text, styles, colW, maxLines, fits) {
+  for (const key of styles) {
+    const st = TYPE[key], b = wrap(ctx, text, st, colW);
+    if (b.lines.length <= maxLines && b.widest <= colW + 1 && (!fits || fits(st, b))) return { st, b };
+  }
+  const st = TYPE[styles[styles.length - 1]]; return { st, b: wrap(ctx, text, st, colW) };
+}
+
+/** Колонка текста снизу вверх: подпись → заголовок → надзаголовок. Возвращает верх блока. */
+function bottomText(ctx, f, th, d, x, colW, footerB, styles, eyebrow, minPhotoBottom) {
+  const pick = fitTitle(ctx, d.title, styles, colW, 3, (st, b) => {
+    const firstB = footerB - 120 - (b.lines.length - 1) * st.lh;
+    return firstB - st.lh - 30 - 60 >= minPhotoBottom;
+  });
+  const { st, b } = pick, n = Math.max(1, b.lines.length);
+  const firstB = footerB - 120 - (n - 1) * st.lh;
+  drawLines(ctx, b, st, x - 2, firstB, titleColors(th, d));
+  const eyebrowB = firstB - st.lh - 30;
+  if (eyebrow) mono(ctx, eyebrow, x, eyebrowB, th.eyebrow, 24, 0.16);
+  return eyebrowB - 18;
+}
+
+// Раскладки фото. «На весь кадр» — единственный случай, когда текст стоит на фото: только поверх фирменного
+// затемнения (градиент в «ночь» снизу и лёгкий сверху под логотип).
+const LAYOUTS = { top: "Сверху", left: "Слева", right: "Справа", full: "На весь кадр" };
+const ON_PHOTO = { ink: C.white, ink2: "rgba(255,255,255,.88)", muted: "rgba(255,255,255,.72)", eyebrow: C.mid,
+  lock: { square: C.blue, dot: C.white, ink: C.white, media: C.mid } };
+
+/** Фирменное затемнение под текст: снизу в «ночь», сверху — чуть-чуть под логотип. */
+function shade(ctx, f, from) {
+  let g = ctx.createLinearGradient(0, from, 0, f.H);
+  g.addColorStop(0, "rgba(15,29,56,0)"); g.addColorStop(0.45, "rgba(15,29,56,.62)"); g.addColorStop(1, "rgba(15,29,56,.94)");
+  ctx.fillStyle = g; ctx.fillRect(0, from, f.W, f.H - from);
+  g = ctx.createLinearGradient(0, 0, 0, f.top + 300);
+  g.addColorStop(0, "rgba(15,29,56,.55)"); g.addColorStop(1, "rgba(15,29,56,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, f.W, f.top + 300);
+}
+/** Какая раскладка реально применится: в сторис фото сбоку слишком узкое, в широком «сверху» — слишком низкое. */
+function effLayout(f, layout) {
+  if (f.H > 1.5 * f.W && (layout === "left" || layout === "right")) return "top";
+  if (f.W > f.H && layout === "top") return "left";
+  return layout;
+}
+
+/**
+ * Общий пост с фото. cfg: label — метка в шапке (или null — логотип внизу), tagColors, styles — шкала заголовка,
+ * footer(ctx, th, x, x1, footerB, narrow) — нижняя строка, photoLabel — подпись заглушки.
+ */
+function photoPost(ctx, f, th0, d, ph, layout, cfg) {
+  const L = effLayout(f, layout), full = L === "full";
+  const th = full ? { ...th0, ...ON_PHOTO } : th0;
+  const side = L === "left" || L === "right";
+  const half = Math.round(f.W / 2);
+  const colX = L === "left" ? half + 30 : M, colW = side ? half - 30 - M : f.W - 2 * M;
+  const footerB = f30(f.H - f.bottom - 30), narrow = colW < 700;
+  let box;
+  if (full) {
+    box = { x: 0, y: 0, w: f.W, h: f.H };
+    drawPhoto(ctx, box, ph, th0, 0, cfg.photoLabel);
+  } else if (side) {
+    box = { x: L === "left" ? M : f.W - M - (half - 30 - M), y: M, w: half - 30 - M, h: f.H - 2 * M };
+    drawPhoto(ctx, box, ph, th, 36, cfg.photoLabel);
+  }
+  const titleTop = full ? f.top + 90 + 120 : side ? f.top + 90 + 60 : c60(f.top + 90 + 60) + Math.round(f.H * 0.24);
+  // Текст снизу вверх считаем до рисования затемнения, чтобы знать, откуда оно начинается
+  const plan = (() => {
+    const fb = cfg.label || narrow ? footerB : footerB - 30;
+    const pick = fitTitle(ctx, d.title, cfg.styles, colW, side ? 4 : 3, (st, b) => fb - 120 - (b.lines.length - 1) * st.lh - st.lh - 30 - 60 >= titleTop);
+    const n = Math.max(1, pick.b.lines.length), firstB = fb - 120 - (n - 1) * pick.st.lh;
+    return { ...pick, firstB, eyebrowB: firstB - pick.st.lh - 30 };
+  })();
+  if (full) shade(ctx, f, Math.max(0, plan.eyebrowB - 420));
+  // Логотип: в шапке; у фотоотчёта — внизу справа, а в узкой колонке тоже в шапке, чтобы не налезал на подпись
+  if (cfg.label || narrow) { drawLockup(ctx, colX, f.top, G_HEAD, th.lock); if (cfg.label && (!narrow || !side)) mono(ctx, cfg.label, colX + colW, f.top + 60, th.muted, 24, 0.14, "right"); }
+  else { const lw = lockupWidth(ctx, G_HEAD); drawLockup(ctx, colX + colW - lw, footerB - 6 * G_HEAD, G_HEAD, th.lock); }
+  cfg.footer(ctx, th, colX, colX + colW, footerB, narrow);
+  drawLines(ctx, plan.b, plan.st, colX - 2, plan.firstB, titleColors(th, d));
+  if (d.eyebrow) monoFit(ctx, d.eyebrow, colX, plan.eyebrowB, th.eyebrow, colW, 0.16);
+  if (L === "top") {
+    const photoTop = cfg.label ? c60(f.top + 90 + 60) : f.top;
+    box = { x: M, y: photoTop, w: f.W - 2 * M, h: Math.max(180, f60(plan.eyebrowB - 60) - photoTop) };
+    drawPhoto(ctx, box, ph, th, 36, cfg.photoLabel);
+  }
+  if (full) tag(ctx, d.tag, colX, plan.eyebrowB - 18 - 60 - 30, cfg.tagColors(th0));
+  else tag(ctx, d.tag, box.x + 30, box.y + 30, cfg.tagColors(th0));
+  return { photoBox: box };
+}
+
+const TEMPLATES = {
+  announce: {
+    label: "Анонс", photo: "Фото события", layouts: ["top", "left", "right", "full"],
+    fields: [
+      ["tag", "Дата и время (на фото)", "14 ноября · 18:00"],
+      ["eyebrow", "Тип события", "Открытая лекция"],
+      ["title", "Заголовок", "Как снять\nрепортаж", true],
+      ["place", "Место", "Аудитория 305 · вход свободный"],
+    ],
+    draw: (ctx, f, th, d, ph, layout) => photoPost(ctx, f, th, d, ph, layout, {
+      label: "Анонс", styles: ["display", "h1", "h2"], photoLabel: "Фото события", tagColors: (t) => t.tagA,
+      footer(ctx, th, x, x1, b, narrow) {
+        plain(ctx, d.place, narrow ? { ...TYPE.body, size: 28 } : TYPE.body, x, b, th.ink);
+        if (!narrow && f.W <= f.H) mono(ctx, "Высшая ИТ-школа", x1, b, th.muted, 24, 0.14, "right");
+      },
+    }),
+  },
+  report: {
+    label: "Фотоотчёт", photo: "Главное фото", layouts: ["top", "left", "right", "full"],
+    fields: [
+      ["tag", "Плашка на фото", "Фотоотчёт · 48 фото"],
+      ["eyebrow", "Дата и событие", "12 ноября · День открытых дверей"],
+      ["title", "Заголовок", "Как прошёл день\nоткрытых дверей", true],
+      ["credit", "Подпись", "Фото: медиа ВИТШ"],
+    ],
+    draw: (ctx, f, th, d, ph, layout) => photoPost(ctx, f, th, d, ph, layout, {
+      label: null, styles: ["h1", "h2"], photoLabel: "Главное фото", tagColors: (t) => t.tagB,
+      footer(ctx, th, x, x1, b, narrow) { monoFit(ctx, d.credit, x, b, th.muted, narrow ? x1 - x : x1 - x - 260); },
+    }),
+  },
+  quote: {
+    label: "Цитата", photo: "Портрет спикера", layouts: ["circle", "full"],
+    fields: [
+      ["quote", "Цитата", "Лучший способ понять, как работает сервис, — сломать его на хакатоне и починить к утру", true],
+      ["name", "Имя", "Алексей Орлов"],
+      ["role", "Кто это", "Спикер · Хакатон ВИТШ"],
+    ],
+    draw(ctx, f, th0, d, ph, layout) {
+      const wide = f.W > f.H, colW = wide ? 1320 : f.W - 2 * M;
+      if (layout === "full") {
+        // Портрет на весь кадр, цитата снизу на затемнении
+        const th = { ...th0, ...ON_PHOTO }, footerB = f30(f.H - f.bottom - 30);
+        drawPhoto(ctx, { x: 0, y: 0, w: f.W, h: f.H }, ph, th0, 0, "Портрет спикера");
+        const pick = fitTitle(ctx, d.quote, ["quoteM", "quoteS"], colW, 6);
+        const n = pick.b.lines.length, lastB = footerB - 120, firstB = lastB - (n - 1) * pick.st.lh, qMarkB = firstB - 90;
+        shade(ctx, f, Math.max(0, qMarkB - 520));
+        header(ctx, f, th, M, f.W - M, "Цитата");
+        ctx.font = `500 112px ${SANS}`; ctx.fillStyle = th.eyebrow; fillText(ctx, "«", M - 4, qMarkB, 0);
+        drawLines(ctx, pick.b, pick.st, M - 2, firstB, () => th.ink);
+        const w = plain(ctx, d.name, { ...TYPE.name, size: 40 }, M, footerB, th.ink);
+        mono(ctx, d.role, M + w + 30, footerB, th.muted);
+        return { photoBox: { x: 0, y: 0, w: f.W, h: f.H, geom: lastGeom } };
+      }
+      const th = th0;
+      header(ctx, f, th, M, f.W - M, "Цитата");
+      const P = wide ? 300 : 240;
+      const box = { x: M, y: f.H - f.bottom - P, w: P, h: P };
+      drawPhoto(ctx, box, ph, th, "circle", "Фото");
+      const nameB = s30(box.y + P / 2 + 6);
+      plain(ctx, d.name, TYPE.name, box.x + P + 30, nameB, th.ink);
+      mono(ctx, d.role, box.x + P + 30, nameB + 60, th.muted);
+      // Цитата: кавычка и текст от шапки вниз, кегль подбирается под свободное место
+      let qMarkB = c60(f.top + 90 + 150);
+      const avail = box.y - 60;
+      const pick = fitTitle(ctx, d.quote, ["quoteL", "quoteM", "quoteS"], colW, 9, (st, b) => qMarkB + 90 + (b.lines.length - 1) * st.lh + 30 <= avail);
+      // Короткая цитата на высоком кадре встаёт по центру свободного места, но по линиям сетки
+      const free = avail - (qMarkB + 90 + (pick.b.lines.length - 1) * pick.st.lh + 30);
+      if (free > 120) qMarkB += f60(free / 2);
+      ctx.font = `500 112px ${SANS}`; ctx.fillStyle = th.eyebrow; fillText(ctx, "«", M - 4, qMarkB, 0);
+      drawLines(ctx, pick.b, pick.st, M - 2, qMarkB + 90, () => th.ink);
+      return { photoBox: box };
+    },
+  },
+  news: {
+    label: "Новость", photo: null,
+    fields: [
+      ["eyebrow", "Рубрика", "Новости медиа"],
+      ["title", "Заголовок", "Открыт набор\nв медиа", true],
+      ["body", "Текст", "Ищем фотографов, монтажёров и авторов. Опыт не нужен — научим на первых съёмках.", true],
+      ["date", "Дата или призыв", "Заявки до 15 ноября"],
+    ],
+    draw(ctx, f, th, d) {
+      const wide = f.W > f.H, colW = wide ? 1080 : f.W - 2 * M;
+      // Фрагмент знака уходит за правый нижний край — как на кнопках меню
+      const u = wide ? 120 : 96;
+      drawMark(ctx, f.W - 4.2 * u, f.H - f.bottom + 60 - 4.6 * u, u, th.frag);
+      header(ctx, f, th, M, f.W - M, "");
+      const footerB = f30(f.H - f.bottom - 30);
+      mono(ctx, d.date, M, footerB, th.ink);
+      const eyebrowB = c60(f.top + 90 + 120);
+      if (d.eyebrow) mono(ctx, d.eyebrow, M, eyebrowB, th.eyebrow, 24, 0.16);
+      const fragTop = f.H - f.bottom + 60 - 2.6 * u;
+      const pick = fitTitle(ctx, d.title, ["display", "h1", "h2"], colW, 4, (st, b) => eyebrowB + 30 + st.lh * b.lines.length + 60 < footerB - 120);
+      const firstB = eyebrowB + 30 + pick.st.lh;
+      drawLines(ctx, pick.b, pick.st, M - 2, firstB, titleColors(th, d));
+      const bodyB = firstB + (pick.b.lines.length - 1) * pick.st.lh + 90;
+      const bw = wide ? 960 : Math.min(colW, f.W - 2 * M - (f.H < 1300 ? 300 : 0));
+      const body = wrap(ctx, d.body, TYPE.body, bw), maxLines = Math.max(0, Math.floor((Math.min(footerB - 90, fragTop - 30) - bodyB) / 60) + 1);
+      if (body.lines.length > maxLines) { body.lines = body.lines.slice(0, maxLines); if (maxLines) body.lines[maxLines - 1].s += " …"; }
+      drawLines(ctx, body, TYPE.body, M, bodyB, () => th.ink2);
+      return {};
+    },
+  },
+};
+
+/** Полный кадр: фон, клетка 60, шаблон. */
+function render(canvas, fmtKey, state, photo) {
+  const f = FORMATS[fmtKey], th = THEMES[state.theme], tpl = TEMPLATES[state.tpl];
+  canvas.width = f.W; canvas.height = f.H;
+  const ctx = canvas.getContext("2d");
+  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+  ctx.fillStyle = th.bg; ctx.fillRect(0, 0, f.W, f.H);
+  ctx.fillStyle = th.grid;
+  for (let x = 0; x <= f.W; x += 60) ctx.fillRect(x, 0, 1, f.H);
+  for (let y = 0; y <= f.H; y += 60) ctx.fillRect(0, y, f.W, 1);
+  const d = state.data[state.tpl];
+  lastGeom = null;
+  return tpl.draw(ctx, f, th, { ...d, twoTone: state.twoTone }, state.tpl === "quote" ? photo.portrait : photo.main, state.layouts[state.tpl]) || {};
+}
+
+/* ===================== Интерфейс ===================== */
+const $ = (id) => document.getElementById(id);
+const DRAFT_KEY = "vitsh-generator-v2";
+const state = { tpl: "announce", fmt: "post", theme: "light", twoTone: true, data: {}, layouts: { announce: "top", report: "full", quote: "circle", news: "" } };
+for (const [k, t] of Object.entries(TEMPLATES)) state.data[k] = Object.fromEntries(t.fields.map(([id, , def]) => [id, def]));
+try { const saved = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (saved) { Object.assign(state, { ...saved, data: { ...state.data, ...saved.data }, layouts: { ...state.layouts, ...saved.layouts } }); } } catch (e) {}
+const photo = { main: null, portrait: null };
+let last = {};
+
+function saveDraft() { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(state)); } catch (e) {} }
+
+function seg(el, items, key, onPick) {
+  el.innerHTML = "";
+  for (const [val, html] of items) {
+    const b = document.createElement("button");
+    b.type = "button"; b.innerHTML = html; b.setAttribute("aria-pressed", String(state[key] === val));
+    b.addEventListener("click", () => { state[key] = val; onPick(); });
+    el.appendChild(b);
+  }
+}
+function buildControls() {
+  seg($("tplSeg"), Object.entries(TEMPLATES).map(([k, t]) => [k, t.label]), "tpl", () => { buildControls(); update(); });
+  seg($("fmtSeg"), Object.entries(FORMATS).map(([k, f]) => [k, `${f.label}<small>${f.ratio}</small>`]), "fmt", () => { buildControls(); update(); });
+  seg($("themeSeg"), Object.entries(THEMES).map(([k, t]) => [k, `<span class="swatch" style="background:${t.bg}"></span>${t.name}`]), "theme", () => { buildControls(); update(); });
+  const tpl = TEMPLATES[state.tpl];
+  $("layoutGroup").hidden = !tpl.layouts;
+  if (tpl.layouts) {
+    const names = { ...LAYOUTS, circle: "Портрет в круге" }, el = $("layoutSeg"); el.innerHTML = "";
+    for (const k of tpl.layouts) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = names[k];
+      b.setAttribute("aria-pressed", String(state.layouts[state.tpl] === k));
+      b.addEventListener("click", () => { state.layouts[state.tpl] = k; buildControls(); update(); });
+      el.appendChild(b);
+    }
+    const eff = tpl.layouts.includes("top") ? effLayout(FORMATS[state.fmt], state.layouts[state.tpl]) : state.layouts[state.tpl];
+    $("layoutHint").textContent = eff !== state.layouts[state.tpl] ? `В этом формате фото встанет «${names[eff].toLowerCase()}» — так оно не будет слишком узким.` : state.layouts[state.tpl] === "full" ? "Текст ляжет на фирменное затемнение снизу." : "";
+  }
+  $("photoGroup").hidden = !tpl.photo;
+  if (tpl.photo) $("photoLabel").textContent = tpl.photo;
+  refreshPhotoUI();
+  const box = $("fields"); box.innerHTML = "";
+  for (const [id, label, , multi] of tpl.fields) {
+    const wrapEl = document.createElement("label"); wrapEl.className = "field";
+    const input = document.createElement(multi ? "textarea" : "input");
+    if (!multi) input.type = "text";
+    input.id = `f-${state.tpl}-${id}`; input.value = state.data[state.tpl][id] ?? "";
+    if (multi) input.rows = id === "title" ? 2 : 3;
+    input.addEventListener("input", () => { state.data[state.tpl][id] = input.value; update(); });
+    wrapEl.innerHTML = `<span>${label}</span>`; wrapEl.appendChild(input);
+    if (id === "title") wrapEl.insertAdjacentHTML("beforeend", `<span class="hint">Enter — новая строка. Кегль подберётся сам.</span>`);
+    box.appendChild(wrapEl);
+  }
+  if (tpl.fields.some(([id]) => id === "title")) {
+    const c = document.createElement("label"); c.className = "check";
+    c.innerHTML = `<input type="checkbox" id="twoTone" ${state.twoTone ? "checked" : ""}> Вторая строка заголовка серая`;
+    c.querySelector("input").addEventListener("change", (e) => { state.twoTone = e.target.checked; update(); });
+    box.appendChild(c);
+  }
+}
+function refreshPhotoUI() {
+  const ph = state.tpl === "quote" ? photo.portrait : photo.main;
+  $("photoName").textContent = ph ? ph.name : "Выберите или перетащите фото";
+  $("thumb").style.backgroundImage = ph ? `url(${ph.url})` : "";
+  $("photoTools").hidden = !ph; $("panHint").hidden = !ph;
+  if (ph) $("zoom").value = ph.zoom;
+  $("preview").classList.toggle("pan", !!ph);
+}
+function update() {
+  const f = FORMATS[state.fmt];
+  last = render($("preview"), state.fmt, state, photo);
+  $("metaSize").textContent = `${FORMATS[state.fmt].label} · ${f.W} × ${f.H}`;
+  saveDraft();
+}
+
+/* ---- фото: загрузка, масштаб, перетаскивание кадра ---- */
+function loadPhoto(file) {
+  if (!file || !file.type.startsWith("image/")) { status("Нужен файл с картинкой: JPG или PNG."); return; }
+  const url = URL.createObjectURL(file), img = new Image();
+  img.onload = () => {
+    const slot = state.tpl === "quote" ? "portrait" : "main";
+    if (photo[slot]) URL.revokeObjectURL(photo[slot].url);
+    photo[slot] = { img, url, name: file.name, zoom: 1, fx: 0.5, fy: 0.5 };
+    refreshPhotoUI(); update(); status("");
+  };
+  img.onerror = () => status("Не получилось открыть этот файл. Попробуйте другой JPG или PNG.");
+  img.src = url;
+}
+$("photoInput").addEventListener("change", (e) => loadPhoto(e.target.files[0]));
+const drop = $("drop");
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => loadPhoto(e.dataTransfer.files[0]));
+$("zoom").addEventListener("input", (e) => { const ph = state.tpl === "quote" ? photo.portrait : photo.main; if (ph) { ph.zoom = +e.target.value; update(); } });
+$("photoClear").addEventListener("click", () => {
+  const slot = state.tpl === "quote" ? "portrait" : "main";
+  if (photo[slot]) URL.revokeObjectURL(photo[slot].url);
+  photo[slot] = null; $("photoInput").value = ""; refreshPhotoUI(); update();
+});
+(() => {
+  const cv = $("preview"); let drag = null;
+  const toCanvas = (e) => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height, k: cv.width / r.width }; };
+  cv.addEventListener("pointerdown", (e) => {
+    const ph = state.tpl === "quote" ? photo.portrait : photo.main, b = last.photoBox;
+    if (!ph || !b || !b.geom) return;
+    const p = toCanvas(e);
+    if (p.x < b.x || p.x > b.x + b.w || p.y < b.y || p.y > b.y + b.h) return;
+    drag = { ph, p, fx: ph.fx, fy: ph.fy, geom: b.geom }; cv.setPointerCapture(e.pointerId); cv.style.cursor = "grabbing";
+  });
+  cv.addEventListener("pointermove", (e) => {
+    if (!drag) return; const p = toCanvas(e);
+    if (drag.geom.ox > 0) drag.ph.fx = Math.min(1, Math.max(0, drag.fx - (p.x - drag.p.x) / drag.geom.ox));
+    if (drag.geom.oy > 0) drag.ph.fy = Math.min(1, Math.max(0, drag.fy - (p.y - drag.p.y) / drag.geom.oy));
+    update();
+  });
+  const end = () => { drag = null; cv.style.cursor = ""; };
+  cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+})();
+
+/* ---- скачивание: в артефакте через downloads, локально — обычной ссылкой ---- */
+function status(s) { $("status").textContent = s; }
+let downloads;
+const downloadsReady = (window.claude?.use ? window.claude.use("downloads").catch(() => null) : Promise.resolve(null)).then((d) => (downloads = d));
+const toBlob = (canvas) => new Promise((res) => canvas.toBlob(res, "image/png"));
+async function offer(filename, blob) {
+  await downloadsReady;
+  if (downloads) {
+    try { await downloads.save({ filename, data: blob }); status(`Сохранено: ${filename}`); }
+    catch (e) { status(e && e.code === "declined" ? "Сохранение отменено." : e && e.code === "rate_limited" ? "Окно сохранения уже открыто — закройте его и нажмите ещё раз." : "Здесь скачивание недоступно. Откройте генератор в браузере."); }
+    return;
+  }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  status(`Скачано: ${filename}`);
+}
+const slug = { announce: "anons", report: "fotootchet", quote: "citata", news: "novost" };
+$("saveOne").addEventListener("click", async () => {
+  const c = document.createElement("canvas"); render(c, state.fmt, state, photo);
+  await offer(`vitsh-${slug[state.tpl]}-${state.fmt}.png`, await toBlob(c));
+});
+$("saveAll").addEventListener("click", async () => {
+  if (!window.JSZip) { status("Архив не собрался: не загрузилась библиотека. Скачайте форматы по одному."); return; }
+  const zip = new JSZip();
+  for (const k of Object.keys(FORMATS)) { const c = document.createElement("canvas"); render(c, k, state, photo); zip.file(`vitsh-${slug[state.tpl]}-${k}-${FORMATS[k].W}x${FORMATS[k].H}.png`, await toBlob(c)); }
+  await offer(`vitsh-${slug[state.tpl]}-vse-formaty.zip`, await zip.generateAsync({ type: "blob" }));
+});
+
+/* ---- старт: ждём шрифты с кириллицей, иначе canvas нарисует запасным шрифтом ---- */
+buildControls();
+const lm = $("logoMark").getContext("2d"); drawMark(lm, 11, 11, 11, { square: C.blue, dot: C.navy });
+Promise.all([
+  document.fonts.load(`600 100px ${SANS}`, "ВИТШ Аа"), document.fonts.load(`500 100px ${SANS}`, "Аа"), document.fonts.load(`400 100px ${SANS}`, "Аа"),
+  document.fonts.load(`500 100px "${MONO}"`, "МЕДИА Аа 0123"),
+]).catch(() => {}).then(() => document.fonts.ready).then(update);
+update();
+</script>
+
+</body>
+</html>
